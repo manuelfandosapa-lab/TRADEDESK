@@ -1406,6 +1406,15 @@ function markDrivePending() {
 })();
 
 
+function toggleCompras(id) {
+  const row = document.getElementById(id);
+  const btn = document.getElementById('btn-' + id);
+  if (!row) return;
+  const visible = row.style.display !== 'none';
+  row.style.display = visible ? 'none' : 'table-row';
+  if (btn) btn.textContent = btn.textContent.replace(visible ? '▴' : '▾', visible ? '▾' : '▴');
+}
+
 function openChangePwd() {
   ['pwd-current','pwd-new','pwd-confirm'].forEach(id => {
     const el = document.getElementById(id); if(el) el.value='';
@@ -2072,6 +2081,14 @@ const fmt = (v, decimals=2) => {
   if (v === null || v === undefined || isNaN(v)) return '—';
   return new Intl.NumberFormat('es-ES', {minimumFractionDigits:decimals, maximumFractionDigits:decimals}).format(v) + ' €';
 };
+const fmtK = (v) => {
+  // Compact format for table cells — avoids overflow
+  if (v === null || v === undefined || isNaN(v)) return '—';
+  const abs = Math.abs(v);
+  if (abs >= 1000000) return (v/1000000).toFixed(2).replace('.',',') + 'M€';
+  if (abs >= 1000)    return (v/1000).toFixed(1).replace('.',',') + 'K€';
+  return new Intl.NumberFormat('es-ES', {minimumFractionDigits:2, maximumFractionDigits:2}).format(v) + '€';
+};
 const fmtN = (v, d=2) => {
   if (!v && v !== 0) return '—';
   return new Intl.NumberFormat('es-ES', {minimumFractionDigits:d, maximumFractionDigits:d}).format(v);
@@ -2358,42 +2375,32 @@ function renderCartera(filter='') {
       <th class="left">EMPRESA</th>
       <th>BANCO</th>
       <th>F. COMPRA</th>
-      <th>ACCIONES</th>
-      <th>COSTE TOTAL</th>
-      <th>PX COMPRA</th>
-      <th>PROMEDIO</th>
-      <th style="color:var(--blue)">PX ACTUAL ✎</th>
-      <th>VALOR ACT</th>
-      <th>G/P €</th>
-      <th>G/P %</th>
+      <th style="text-align:right">ACC.</th>
+      <th style="text-align:right">COSTE</th>
+      <th style="text-align:right">PX COMPRA</th>
+      <th style="text-align:right">PROMEDIO</th>
+      <th style="color:var(--blue);text-align:right">PX ACTUAL ✎</th>
+      <th style="text-align:right">VALOR</th>
+      <th style="text-align:right">G/P €</th>
+      <th style="text-align:right">G/P %</th>
       <th style="color:var(--txt3)">ACTUALIZADO</th>
-      <th>ACCIONES</th>
+      <th></th>
     </tr></thead>
     <tbody>
     ${rows.map((r,i) => {
-      const va = r.pxActual * r.acciones;
-      const gp = va - r.coste;
+      const va  = r.pxActual * r.acciones;
+      const gp  = va - r.coste;
       const pct = r.coste > 0 ? gp / r.coste : 0;
-      const ri = DATA.cartera.indexOf(r);
+      const ri  = DATA.cartera.indexOf(r);
 
-      // Detect if same empresa as previous row (for visual grouping)
-      const prevEmpresa = i > 0 ? rows[i-1].empresa.toUpperCase() : null;
-      const sameEmpresa = prevEmpresa === r.empresa.toUpperCase();
-      const nextEmpresa = i < rows.length-1 ? rows[i+1].empresa.toUpperCase() : null;
+      const prevEmpresa  = i > 0 ? rows[i-1].empresa.toUpperCase() : null;
+      const sameEmpresa  = prevEmpresa === r.empresa.toUpperCase();
       const hasMultiBanco = rows.some((x, xi) => xi !== i && x.empresa.toUpperCase() === r.empresa.toUpperCase());
-      const rowBorder = sameEmpresa ? 'border-top:1px dashed rgba(240,180,41,0.15)' : '';
+      const rowBorder    = sameEmpresa ? 'border-top:1px dashed rgba(240,180,41,0.15)' : '';
+      const hasMultiCompras = r.histCompras && r.histCompras.length > 1;
+      const expandId     = `hc-${ri}`;
 
-      const fechaCell = r.histCompras && r.histCompras.length > 1
-        ? `<div style="display:flex;flex-direction:column;gap:3px">
-            ${r.histCompras.map(h => `
-              <div style="display:flex;gap:8px;align-items:center">
-                <span style="font-size:10px;color:var(--txt3);font-family:var(--mono);white-space:nowrap">${fmtDate(h.fcompra)}</span>
-                <span style="font-size:10px;color:var(--gold);font-family:var(--mono)">${fmtN(h.acciones,0)} acc</span>
-              </div>`).join('')}
-           </div>`
-        : `<span class="td-muted">${fmtDate(r.fcompra)}</span>`;
-
-      // Bank badge colors
+      // Bank badge
       const bancoColors = {
         'R4':     {bg:'rgba(240,180,41,0.15)',  color:'#f0b429'},
         'IB':     {bg:'rgba(77,143,255,0.15)',   color:'#4d8fff'},
@@ -2404,38 +2411,74 @@ function renderCartera(filter='') {
       const bc = bancoColors[(r.banco||'').toUpperCase()] || bancoColors['OTRO'];
       const bancoBadge = `<span style="background:${bc.bg};color:${bc.color};font-family:var(--mono);font-size:11px;font-weight:700;padding:4px 10px;border-radius:6px;white-space:nowrap;border:1px solid ${bc.color}33">${r.banco||'—'}</span>`;
 
-      // Empresa cell — show ↕ indicator if same ticker in multiple banks
+      // Empresa cell
       const empresaCell = `<div class="ticker-cell">
         <span class="ticker-badge">${r.empresa}</span>
         ${r.nombre ? `<span style="font-size:11px;color:var(--txt2);font-weight:600;white-space:nowrap">${r.nombre}</span>` : ''}
-        ${hasMultiBanco ? `<span style="font-size:9px;color:var(--gold);font-family:var(--mono);opacity:0.7" title="Este ticker está en varios bancos">⊕ multi-banco</span>` : ''}
-        ${r.histCompras && r.histCompras.length > 1 ? `<span style="font-size:9px;color:var(--txt3);font-family:var(--mono)">${r.histCompras.length} compras</span>` : ''}
+        ${hasMultiBanco ? `<span style="font-size:9px;color:var(--gold);font-family:var(--mono);opacity:0.7">⊕ multi-banco</span>` : ''}
       </div>`;
 
-      const updTs = r.pxUpdated || null;
+      // Fecha cell — compact: show first date + toggle if multiple
+      const fechaCell = hasMultiCompras
+        ? `<div>
+            <span class="td-muted">${fmtDate(r.fcompra)}</span>
+            <button onclick="toggleCompras('${expandId}')" 
+              style="margin-left:6px;background:rgba(240,180,41,0.1);border:1px solid rgba(240,180,41,0.3);
+              border-radius:4px;color:var(--gold);font-size:9px;font-family:var(--mono);
+              padding:2px 6px;cursor:pointer" id="btn-${expandId}">
+              ${r.histCompras.length} compras ▾
+            </button>
+           </div>`
+        : `<span class="td-muted">${fmtDate(r.fcompra)}</span>`;
+
+      // Expandable compras detail row
+      const comprasDetail = hasMultiCompras ? `
+        <tr id="${expandId}" style="display:none;background:var(--bg3)">
+          <td colspan="12" style="padding:0">
+            <div style="padding:10px 16px 12px 60px">
+              <div style="font-size:9px;color:var(--txt3);font-family:var(--mono);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Detalle de compras</div>
+              <div style="display:grid;grid-template-columns:auto auto auto auto auto;gap:6px 20px;align-items:center">
+                <span style="font-size:9px;color:var(--txt3);font-family:var(--mono)">FECHA</span>
+                <span style="font-size:9px;color:var(--txt3);font-family:var(--mono)">ACCIONES</span>
+                <span style="font-size:9px;color:var(--txt3);font-family:var(--mono)">PX COMPRA</span>
+                <span style="font-size:9px;color:var(--txt3);font-family:var(--mono)">CORRETAJE</span>
+                <span style="font-size:9px;color:var(--txt3);font-family:var(--mono)">COSTE</span>
+                ${r.histCompras.map(h => `
+                  <span style="font-family:var(--mono);font-size:11px;color:var(--txt3)">${fmtDate(h.fcompra)}</span>
+                  <span style="font-family:var(--mono);font-size:11px;color:var(--gold)">${fmtN(h.acciones,0)} acc</span>
+                  <span style="font-family:var(--mono);font-size:11px">${fmtN(h.pxCompra,3)} €</span>
+                  <span style="font-family:var(--mono);font-size:11px;color:var(--red)">${h.corretaje ? fmt(h.corretaje) : '—'}</span>
+                  <span style="font-family:var(--mono);font-size:11px">${fmt(h.coste || h.acciones * h.pxCompra)}</span>
+                `).join('')}
+              </div>
+            </div>
+          </td>
+        </tr>` : '';
+
+      const updTs   = r.pxUpdated || null;
       const updCell = updTs
         ? `<div style="font-size:10px;font-family:var(--mono);color:var(--green);white-space:nowrap">● ${updTs}</div>`
-        : `<span style="font-size:10px;font-family:var(--mono);color:var(--txt3)">Sin actualizar</span>`;
+        : `<span style="font-size:10px;font-family:var(--mono);color:var(--txt3)">—</span>`;
 
       return `<tr style="${rowBorder}">
         <td>${empresaCell}</td>
         <td style="text-align:center">${bancoBadge}</td>
         <td>${fechaCell}</td>
-        <td>${fmtN(r.acciones,0)}</td>
-        <td>${fmt(r.coste)}</td>
-        <td class="td-muted">${fmtN(r.pxCompra)}</td>
-        <td class="td-gold">${r.promedio ? fmtN(r.promedio) : '—'}</td>
+        <td style="text-align:right;font-family:var(--mono)">${fmtN(r.acciones,0)}</td>
+        <td style="text-align:right;font-family:var(--mono)">${fmtK(r.coste)}</td>
+        <td class="td-muted" style="text-align:right;font-family:var(--mono)">${fmtN(r.pxCompra)}</td>
+        <td class="td-gold" style="text-align:right;font-family:var(--mono)">${r.promedio ? fmtN(r.promedio) : '—'}</td>
         <td><input class="price-input" type="number" step="0.01" value="${r.pxActual||''}" data-idx="${ri}" onchange="updatePrice(${ri},this.value)" onkeydown="if(event.key==='Enter')this.blur()"></td>
-        <td>${fmt(va)}</td>
-        <td class="${gpClass(gp)}">${gpSign(gp)}</td>
-        <td class="${gpClass(pct)}">${fmtPct(pct)}</td>
+        <td style="text-align:right;font-family:var(--mono)">${fmtK(va)}</td>
+        <td class="${gpClass(gp)}" style="text-align:right;font-family:var(--mono);font-weight:700">${gpSign(gp)}</td>
+        <td class="${gpClass(pct)}" style="text-align:right;font-family:var(--mono)">${fmtPct(pct)}</td>
         <td>${updCell}</td>
         <td style="text-align:center;white-space:nowrap;display:flex;gap:6px;justify-content:center;padding:8px 10px">
           <button class="btn btn-ghost btn-sm" onclick="openEditModal(${ri})" style="color:var(--gold);border-color:rgba(240,180,41,0.3)">✎</button>
           <button class="btn btn-danger btn-sm" onclick="openVentaModal(${ri})">↗ Vender</button>
           <button class="btn btn-danger btn-sm" onclick="deletePosition(${ri})" style="background:rgba(230,55,87,0.08);padding:5px 8px" title="Eliminar">✕</button>
         </td>
-      </tr>`;
+      </tr>${comprasDetail}`;
     }).join('')}
     </tbody>
     <tfoot><tr style="background:var(--bg1);border-top:2px solid var(--border2)">
