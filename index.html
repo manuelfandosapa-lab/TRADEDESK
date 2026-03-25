@@ -607,6 +607,7 @@ tbody td:first-child { text-align:left; font-family:var(--sans); font-weight:700
           <span style="font-size:11px;color:var(--txt3);font-family:var(--mono);">Actualiza el precio en la columna azul</span>
           <button class="btn btn-ghost btn-sm" onclick="toggleCarteraSort()" id="btn-cartera-sort" style="margin-left:8px;font-size:10px;font-family:var(--mono)">📅 Recientes primero</button>
           <button class="btn btn-ghost btn-sm" onclick="openConsolidarModal()" style="margin-left:12px;border-color:rgba(240,180,41,0.4);color:var(--gold)">⊕ Consolidar posiciones</button>
+          <button class="btn btn-ghost btn-sm" onclick="printCartera()" style="margin-left:8px;border-color:var(--border2);color:var(--txt3)">🖨 Imprimir</button>
           <div class="search-box" style="margin-left:auto">
             <span style="color:var(--txt3);font-size:12px;">⌕</span>
             <input type="text" id="search-cartera" placeholder="Buscar empresa..." oninput="filterTable('cartera')">
@@ -1406,6 +1407,76 @@ function markDrivePending() {
 })();
 
 
+function printCartera() {
+  const totalCoste = rows.reduce((s,r) => s+r.coste, 0);
+  const totalAct   = rows.reduce((s,r) => s+(r.pxActual*r.acciones), 0);
+  const totalGP    = totalAct - totalCoste;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+  <title>TradeDesk — Posiciones Abiertas ${new Date().toLocaleDateString('es-ES')}</title>
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 11px; color: #000; margin: 20px; }
+    h2 { font-size: 16px; margin-bottom: 4px; }
+    .sub { font-size: 10px; color: #666; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { background: #1a1a2e; color: #fff; padding: 6px 8px; text-align: left; font-size: 10px; }
+    td { padding: 5px 8px; border-bottom: 1px solid #eee; }
+    .num { text-align: right; font-family: monospace; }
+    .green { color: #007a4d; font-weight: bold; }
+    .red { color: #cc0022; font-weight: bold; }
+    .gold { color: #b8860b; font-weight: bold; }
+    tfoot td { background: #f5f5f5; font-weight: bold; border-top: 2px solid #333; }
+    @media print { body { margin: 10px; } }
+  </style></head><body>
+  <h2>TradeDesk — Posiciones Abiertas</h2>
+  <div class="sub">Generado el ${new Date().toLocaleString('es-ES')} · ${rows.length} posiciones</div>
+  <table>
+    <thead><tr>
+      <th>EMPRESA</th><th>BANCO</th><th>F. COMPRA</th>
+      <th class="num">ACCIONES</th><th class="num">COSTE</th>
+      <th class="num">PX COMPRA</th><th class="num">PROMEDIO</th>
+      <th class="num">PX ACTUAL</th><th class="num">VALOR ACT.</th>
+      <th class="num">G/P €</th><th class="num">G/P %</th>
+    </tr></thead>
+    <tbody>
+    ${rows.map(r => {
+      const va  = r.pxActual * r.acciones;
+      const gp  = va - r.coste;
+      const pct = r.coste > 0 ? gp/r.coste : 0;
+      const cls = gp >= 0 ? 'green' : 'red';
+      return `<tr>
+        <td><strong>${r.empresa}</strong>${r.nombre ? '<br><span style="color:#666;font-size:10px">'+r.nombre+'</span>' : ''}</td>
+        <td>${r.banco||'—'}</td>
+        <td style="white-space:nowrap">${fmtDate(r.fcompra)}${r.histCompras&&r.histCompras.length>1?'<br><span style="color:#666;font-size:9px">'+r.histCompras.length+' compras</span>':''}</td>
+        <td class="num">${fmtN(r.acciones,0)}</td>
+        <td class="num">${fmt(r.coste)}</td>
+        <td class="num">${fmtN(r.pxCompra)}</td>
+        <td class="num gold">${fmtN(r.promedio||r.pxCompra)}</td>
+        <td class="num">${fmtN(r.pxActual)}</td>
+        <td class="num">${fmt(va)}</td>
+        <td class="num ${cls}">${gpSign(gp)}</td>
+        <td class="num ${cls}">${fmtPct(pct)}</td>
+      </tr>`;
+    }).join('')}
+    </tbody>
+    <tfoot><tr>
+      <td colspan="4">TOTALES</td>
+      <td class="num">${fmt(totalCoste)}</td>
+      <td colspan="3"></td>
+      <td class="num">${fmt(totalAct)}</td>
+      <td class="num ${totalGP>=0?'green':'red'}">${gpSign(totalGP)}</td>
+      <td class="num ${totalGP>=0?'green':'red'}">${fmtPct(totalCoste>0?totalGP/totalCoste:0)}</td>
+    </tr></tfoot>
+  </table>
+  </body></html>`;
+
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(() => w.print(), 500);
+}
+
 function toggleCompras(id) {
   const row = document.getElementById(id);
   const btn = document.getElementById('btn-' + id);
@@ -1882,7 +1953,6 @@ function renderLivePricesTable(precios) {
     return;
   }
 
-  // Match prices to cartera positions
   const rows = precios.map(p => {
     const posiciones = DATA.cartera.filter(r => r.empresa.toUpperCase() === p.ticker.toUpperCase());
     const pxActualPromedio = posiciones.length > 0
@@ -1892,26 +1962,40 @@ function renderLivePricesTable(precios) {
     return {...p, posiciones: posiciones.length, pxAnterior: pxActualPromedio, variacion};
   });
 
+  const foundCount = rows.filter(r => r.precio !== null && r.precio !== undefined).length;
+
   const html = `
-    <div style="margin-bottom:12px;font-size:11px;color:var(--txt3);font-family:var(--mono);display:flex;justify-content:space-between;align-items:center">
-      <span>Precios obtenidos ${new Date().toLocaleTimeString('es-ES')} · Revisa y aplica los que sean correctos</span>
-      <span style="color:var(--blue)">Si el ticker es incorrecto, edítalo y vuelve a buscar</span>
+    <div style="margin-bottom:12px;font-size:11px;color:var(--txt3);font-family:var(--mono);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span>Precios obtenidos ${new Date().toLocaleTimeString('es-ES')} · <span style="color:var(--green)">${foundCount} encontrados</span> · Marca los que quieras aplicar</span>
+      <div style="display:flex;gap:8px">
+        <button onclick="selectAllPrices(true)" class="btn btn-ghost btn-sm" style="font-size:10px">✓ Seleccionar todos</button>
+        <button onclick="selectAllPrices(false)" class="btn btn-ghost btn-sm" style="font-size:10px">✕ Deseleccionar todos</button>
+      </div>
     </div>
     <table style="width:100%">
       <thead><tr style="background:var(--bg1)">
+        <th style="padding:8px 12px;width:32px"></th>
         <th style="padding:8px 12px;text-align:left;font-size:10px;color:var(--txt3);font-family:var(--mono);letter-spacing:1px">EMPRESA</th>
-        <th style="padding:8px 12px;text-align:left;font-size:10px;color:var(--txt3);font-family:var(--mono)">TICKER YAHOO</th>
+        <th style="padding:8px 12px;text-align:left;font-size:10px;color:var(--txt3);font-family:var(--mono)">TICKER</th>
         <th style="padding:8px 12px;text-align:right;font-size:10px;color:var(--txt3);font-family:var(--mono)">PRECIO ACTUAL</th>
         <th style="padding:8px 12px;text-align:right;font-size:10px;color:var(--txt3);font-family:var(--mono)">TU PRECIO</th>
         <th style="padding:8px 12px;text-align:right;font-size:10px;color:var(--txt3);font-family:var(--mono)">VARIACIÓN</th>
-        <th style="padding:8px 12px;text-align:center;font-size:10px;color:var(--txt3);font-family:var(--mono)">APLICAR</th>
+        <th style="padding:8px 12px;text-align:center;font-size:10px;color:var(--txt3);font-family:var(--mono)">ACCIÓN</th>
       </tr></thead>
       <tbody>
       ${rows.map((r, i) => {
         const hasPrice = r.precio !== null && r.precio !== undefined;
         const varColor = !r.variacion ? 'var(--txt3)' : r.variacion >= 0 ? 'var(--green)' : 'var(--red)';
         const varTxt   = r.variacion !== null ? (r.variacion >= 0 ? '+' : '') + (r.variacion*100).toFixed(2) + '%' : '—';
-        return `<tr style="border-bottom:1px solid var(--border)">
+        const bigMove  = r.variacion && Math.abs(r.variacion) > 0.1; // highlight >10% moves
+        return `<tr style="border-bottom:1px solid var(--border);${bigMove?'background:rgba(230,55,87,0.05)':''}">
+          <td style="padding:8px 12px;text-align:center">
+            ${hasPrice
+              ? `<input type="checkbox" id="chk-price-${i}" checked 
+                  style="width:14px;height:14px;cursor:pointer;accent-color:var(--gold)">`
+              : '<span style="color:var(--txt3);font-size:10px">—</span>'
+            }
+          </td>
           <td style="padding:10px 12px"><span class="ticker-badge">${r.ticker}</span></td>
           <td style="padding:10px 12px">
             <input value="${r.symbol}" id="sym-${i}" 
@@ -1920,6 +2004,7 @@ function renderLivePricesTable(precios) {
           </td>
           <td style="padding:10px 12px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--txt)">
             ${hasPrice ? fmtN(r.precio, 3) + ' ' + (r.moneda||'€') : '<span style="color:var(--red)">No encontrado</span>'}
+            ${bigMove ? '<span style="font-size:9px;color:var(--red);margin-left:4px">⚠ +10%</span>' : ''}
           </td>
           <td style="padding:10px 12px;text-align:right;font-family:var(--mono);color:var(--txt3)">
             ${r.pxAnterior ? fmtN(r.pxAnterior, 3) : '—'}
@@ -1928,9 +2013,9 @@ function renderLivePricesTable(precios) {
             ${varTxt}
           </td>
           <td style="padding:10px 12px;text-align:center">
-            ${hasPrice
-              ? `<button class="btn btn-primary btn-sm" onclick="applySinglePrice('${r.ticker}', ${r.precio}, ${JSON.stringify(r.nombre||'')})" style="font-size:10px">✓ Aplicar</button>`
-              : `<button class="btn btn-ghost btn-sm" onclick="refetchSingle('${r.ticker}', ${i})" style="font-size:10px;color:var(--gold)">🔄 Reintentar</button>`
+            ${!hasPrice
+              ? `<button class="btn btn-ghost btn-sm" onclick="refetchSingle('${r.ticker}', ${i})" style="font-size:10px;color:var(--gold)">🔄 Reintentar</button>`
+              : ''
             }
           </td>
         </tr>`;
@@ -1941,6 +2026,10 @@ function renderLivePricesTable(precios) {
   document.getElementById('live-prices-content').innerHTML = html;
   document.getElementById('btn-apply-prices').style.display = 'inline-flex';
   document.getElementById('live-prices-actions').style.display = 'flex';
+}
+
+function selectAllPrices(checked) {
+  document.querySelectorAll('[id^="chk-price-"]').forEach(chk => chk.checked = checked);
 }
 
 function updateTickerMap(empresa, newSymbol, rowIdx) {
@@ -1985,7 +2074,9 @@ function applySinglePrice(ticker, precio, nombre) {
 function applyLivePrices() {
   let applied = 0;
   const ts = fmtTimestamp(new Date());
-  _livePricesData.forEach(p => {
+  _livePricesData.forEach((p, i) => {
+    const chk = document.getElementById(`chk-price-${i}`);
+    if (!chk || !chk.checked) return; // skip unchecked
     if (p.precio !== null && p.precio !== undefined) {
       DATA.cartera.forEach(r => {
         if (r.empresa.toUpperCase() === p.ticker.toUpperCase()) {
@@ -2483,12 +2574,12 @@ function renderCartera(filter='') {
     </tbody>
     <tfoot><tr style="background:var(--bg1);border-top:2px solid var(--border2)">
       <td colspan="3" style="padding:12px 14px;font-weight:700;color:var(--txt);font-family:var(--sans)">TOTALES</td>
-      <td style="padding:12px 14px;font-family:var(--mono);text-align:right;font-weight:700;color:var(--gold)">${fmt(totalCoste,0)}</td>
+      <td style="padding:12px 14px;font-family:var(--mono);text-align:right;font-weight:700;color:var(--gold)">${fmtK(totalCoste)}</td>
       <td colspan="3"></td>
-      <td style="padding:12px 14px;font-family:var(--mono);text-align:right;font-weight:700">${fmt(totalAct,0)}</td>
+      <td style="padding:12px 14px;font-family:var(--mono);text-align:right;font-weight:700">${fmtK(totalAct)}</td>
       <td style="padding:12px 14px;font-family:var(--mono);text-align:right;font-weight:700;color:${totalGP>=0?'var(--green)':'var(--red)'}">${gpSign(totalGP)}</td>
       <td style="padding:12px 14px;font-family:var(--mono);text-align:right;font-weight:700;color:${totalGP>=0?'var(--green)':'var(--red)'}">${fmtPct(totalCoste>0?totalGP/totalCoste:0)}</td>
-      <td colspan="3"></td>
+      <td colspan="2"></td>
     </tr></tfoot>
   </table>`;
   document.getElementById('table-cartera-wrap').innerHTML = html;
